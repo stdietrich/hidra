@@ -112,6 +112,7 @@ setup(
         "hidra.sender.eventdetectors",
         "hidra.sender.datafetchers",
         "hidra.receiver",
+        "hidra.receiver.plugins",
         "hidra.hidra_control",
         # define the config as package to include it
         "hidra.conf",
@@ -137,6 +138,7 @@ setup(
         "hidra.sender.eventdetectors": "./src/hidra/sender/eventdetectors",
         "hidra.sender.datafetcher": "./src/hidra/sender/datafetchers",
         "hidra.receiver": "./src/hidra/receiver",
+        "hidra.receiver.plugins": "./src/hidra/receiver/plugins",
         "hidra.hidra_control": "./src/hidra/hidra_control",
         "hidra.conf": "./conf",
     },

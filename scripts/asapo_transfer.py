@@ -8,6 +8,7 @@ import json
 
 import asapo_producer
 from hidra import Transfer
+from hidra.receiver.plugins.asapo_producer import AsapoWorker
 
 logger = logging.getLogger(__name__)
 
@@ -39,71 +40,21 @@ class Ignored(Exception):
 
 class AsapoTransfer:
     def __init__(self, endpoint, beamtime, token, n_threads, file_regex,
-                 data_source=None, timeout=5, beamline='auto',
+                 default_data_source=None, timeout=5, beamline='auto',
                  start_file_idx=1):
 
         self.signal_host = "localhost"
         self.targets = [["localhost", "50101", 1]]
 
-        self.asapo_opt = {}
-        self.asapo_opt['endpoint'] = endpoint
-        self.asapo_opt['beamtime'] = beamtime
-        self.asapo_opt['beamline'] = beamline
-        self.asapo_opt['data_source'] = data_source
-        self.asapo_opt['token'] = token
-        self.asapo_opt['n_threads'] = n_threads
-        self.asapo_opt['timeout'] = timeout
+        self.asapo_worker = AsapoWorker(endpoint, beamtime, token, n_threads, file_regex,
+                                        default_data_source, timeout, beamline,
+                                        start_file_idx)
 
-        self.start_file_idx = start_file_idx
-        self.file_regex = file_regex
-        self.producer = None
-        self.create_producer()
         self.start_transfer()
-
-    def create_producer(self):
-        self.producer = asapo_producer.create_producer(self.asapo_opt['endpoint'], 'processed',
-                                                       self.asapo_opt['beamtime'], self.asapo_opt['beamline'],
-                                                       self.asapo_opt['data_source'],
-                                                       self.asapo_opt['token'],
-                                                       self.asapo_opt['n_threads'],
-                                                       self.asapo_opt['timeout'] * 1000)
-
-    def send_message(self, metadata):
-        local_path = f'{metadata["relative_path"]}/{metadata["filename"]}'
-        logger.info(f"New file at {local_path}")
-        try:
-            stream, file_idx = self._parse_file_name(local_path)
-            logger.debug("using stream %s", stream)
-        except Ignored:
-            logger.debug("Ignoring file %s", local_path)
-            return
-
-        self.producer.send(
-            # files start with index 0 and asapo with 1
-            id=file_idx + 1 - self.start_file_idx,
-            exposed_path=local_path,
-            data=None,
-            user_meta=json.dumps({"hidra": metadata}),
-            ingest_mode=asapo_producer.INGEST_MODE_TRANSFER_METADATA_ONLY,
-            stream=stream,
-            callback=self._callback)
-
-    def _parse_file_name(self, path):
-        matched = parse_file_path(self.file_regex, path)
-        stream = get_entry(matched, "stream")
-        file_idx = int(get_entry(matched, "file_idx"))
-        return stream, file_idx
-
-    def _callback(self, header, err):
-        header = {key: val for key, val in header.items() if key != 'data'}
-        if err is None:
-            logger.debug("Successfully sent: %s", header)
-        else:
-            logger.error("Could not sent: %s, %s", header, err)
 
     def start_transfer(self):
 
-        query = Transfer("QUERY_NEXT", self.signal_host)
+        query = Transfer("STREAM_METADATA", self.signal_host)
         query.initiate(self.targets)
         query.start()
         self.run(query)
@@ -117,7 +68,8 @@ class AsapoTransfer:
                 break
 
             if metadata is not None and data is not None:
-                self.send_message(metadata)
+                local_path = f'{metadata["relative_path"]}/{metadata["filename"]}'
+                self.asapo_worker.send_message(local_path, metadata)
 
 
 def main():
@@ -131,7 +83,7 @@ def main():
     parser.add_argument('--beamline', type=str,
                         help='ASAPO produces beamline',
                         default='auto')
-    parser.add_argument('--data-source', type=str, help='ASAPO data_source',
+    parser.add_argument('--default-data-source', type=str, help='ASAPO data_source',
                         default='test')
     #parser.add_argument('--stream', type=str, help='ASAPO stream. If not given timestamp is used.')
     parser.add_argument('--token', type=str, help='ASAPO produces token',
