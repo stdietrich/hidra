@@ -4,11 +4,9 @@ from __future__ import unicode_literals
 import argparse
 import logging
 import re
-import json
 
-import asapo_producer
 from hidra import Transfer
-from hidra.receiver.plugins.asapo_producer import AsapoWorker
+from plugins.asapo_producer import AsapoWorker
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +91,7 @@ def main():
     parser.add_argument('--start_file_idx', type=int, help='Starting file index',
                         default=1)
     parser.add_argument('--file_regex', type=str, help='Template to file path, which includes `stream` and `file_idx`',
-                        default=".*/(?P<stream>.*)/(?P<file_idx>.*).h5")
+                        default=".*/(?P<scan_id>.*)/(?P<file_idx_in_scan>.*).h5")
     parser.add_argument('--timeout', type=float, help='ASAPO send timeout in [s]', default=0.5)
 
     logging.basicConfig(format="%(asctime)s %(module)s %(lineno)-6d %(levelname)-6s %(message)s",
