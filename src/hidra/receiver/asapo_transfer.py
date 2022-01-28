@@ -5,11 +5,17 @@ import argparse
 import logging
 import signal
 from threading import Event
+from time import sleep
 
 from hidra import Transfer, __version__, generate_filepath
 from plugins.asapo_producer import AsapoWorker
 
 logger = logging.getLogger(__name__)
+
+
+class Stopped(Exception):
+    """Raised when a run is stopped."""
+    pass
 
 
 class AsapoTransfer:
@@ -21,17 +27,20 @@ class AsapoTransfer:
         self.asapo_worker = asapo_worker
         self.reconnect_timout = reconnect_timout
         self.query = Transfer("STREAM_METADATA", self.signal_host)
+        self.stop_run = Event()
 
-    def start_transfer(self, stop_event):
+    def run(self):
+        if self.stop_run.is_set():
+            raise Stopped
         try:
             self.query.initiate(self.targets)
             self.query.start()
-            self.run(stop_event)
+            self._run()
         finally:
-            self.stop()
+            self.query.stop()
 
-    def run(self, stop_event):
-        while not stop_event.is_set():
+    def _run(self):
+        while not self.stop_run.is_set():
             [metadata, data] = self.query.get(timeout=self.reconnect_timout*1000)
             if metadata is not None and data is not None:
                 try:
@@ -42,7 +51,8 @@ class AsapoTransfer:
                     logger.error("Transmission does not succeed. {e}. File ignored".format(e=str(e)))
 
     def stop(self):
-        self.query.stop()
+        logger.info("Runner is stopped.")
+        self.stop_run.set()
 
 
 def main():
@@ -78,18 +88,19 @@ def main():
                                args['timeout'], args['beamline'],
                                args['start_file_idx'])
 
-    stop_event = Event()
-
-    signal.signal(signal.SIGINT, lambda s, f: stop_event.set())
-    signal.signal(signal.SIGTERM, lambda s, f: stop_event.set())
-
     asapo_transfer = AsapoTransfer(asapo_worker, args['signal_host'], args['target_host'], args['target_port'],
                                    args['target_dir'], args['reconnect_timeout'])
 
-    while not stop_event.is_set():
+    signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
+    signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
+
+    while True:
         try:
-            asapo_transfer.start_transfer(stop_event)
+            asapo_transfer.run()
+        except Stopped:
+            break
         except Exception:
+            sleep(args['reconnect_timeout'])
             logger.info("Retrying connection")
 
 
