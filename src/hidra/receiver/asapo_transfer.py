@@ -3,6 +3,8 @@ from __future__ import unicode_literals
 
 import argparse
 import logging
+import signal
+from threading import Event
 
 from hidra import Transfer, __version__, generate_filepath
 from plugins.asapo_producer import AsapoWorker
@@ -11,29 +13,33 @@ logger = logging.getLogger(__name__)
 
 
 class AsapoTransfer:
-    def __init__(self, asapo_worker, signal_host, target_host, target_port, target_dir):
+    def __init__(self, asapo_worker, signal_host, target_host, target_port, target_dir, reconnect_timout):
 
         self.signal_host = signal_host
         self.targets = [[target_host, target_port, 1]]
         self.target_dir = target_dir
         self.asapo_worker = asapo_worker
+        self.reconnect_timout = reconnect_timout
         self.query = Transfer("STREAM_METADATA", self.signal_host)
-        self.query.initiate(self.targets)
 
-    def start_transfer(self):
-        self.query.start()
-        self.run()
+    def start_transfer(self, stop_event):
+        try:
+            self.query.initiate(self.targets)
+            self.query.start()
+            self.run(stop_event)
+        finally:
+            self.stop()
 
-    def run(self):
-        while True:
-            try:
-                [metadata, data] = self.query.get()
-                if metadata is not None and data is not None:
+    def run(self, stop_event):
+        while not stop_event.is_set():
+            [metadata, data] = self.query.get(timeout=self.reconnect_timout*1000)
+            if metadata is not None and data is not None:
+                try:
                     local_path = generate_filepath(self.target_dir, metadata)
                     logger.info("Send file {local_path}".format(local_path=local_path))
                     self.asapo_worker.send_message(local_path, metadata)
-            except Exception as e:
-                logger.error("Transmission does not succeed. {e}. File ignored".format(e=str(e)))
+                except Exception as e:
+                    logger.error("Transmission does not succeed. {e}. File ignored".format(e=str(e)))
 
     def stop(self):
         self.query.stop()
@@ -58,6 +64,8 @@ def main():
     parser.add_argument('--target_host', type=str, help='Target host', default='localhost')
     parser.add_argument('--target_port', type=str, help='Target port', default='50101')
     parser.add_argument('--target_dir', type=str, help='Target directory', default='')
+    parser.add_argument('--reconnect_timeout', type=int, help='Timeout to reconnect to sender',
+                        default=3)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                         help="Set log level for the application")
     args = vars(parser.parse_args())
@@ -69,9 +77,20 @@ def main():
                                args['default_data_source'],
                                args['timeout'], args['beamline'],
                                args['start_file_idx'])
+
+    stop_event = Event()
+
+    signal.signal(signal.SIGINT, lambda s, f: stop_event.set())
+    signal.signal(signal.SIGTERM, lambda s, f: stop_event.set())
+
     asapo_transfer = AsapoTransfer(asapo_worker, args['signal_host'], args['target_host'], args['target_port'],
-                                   args['target_dir'])
-    asapo_transfer.start_transfer()
+                                   args['target_dir'], args['reconnect_timeout'])
+
+    while not stop_event.is_set():
+        try:
+            asapo_transfer.start_transfer(stop_event)
+        except Exception:
+            logger.info("Retrying connection")
 
 
 if __name__ == "__main__":
