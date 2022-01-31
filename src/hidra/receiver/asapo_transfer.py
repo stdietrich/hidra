@@ -42,8 +42,9 @@ class AsapoTransfer:
     def _run(self):
         while not self.stop_run.is_set():
             [metadata, data] = self.query.get(timeout=self.reconnect_timout*1000)
-            if metadata is not None and data is not None:
+            if metadata is not None:
                 try:
+                    print(data, type(data), data is None)
                     local_path = generate_filepath(self.target_dir, metadata)
                     logger.info("Send file {local_path}".format(local_path=local_path))
                     self.asapo_worker.send_message(local_path, metadata)
