@@ -94,13 +94,17 @@ def main():
     signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
     signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
 
+    run_transfer(asapo_transfer, args['reconnect_timeout'])
+
+
+def run_transfer(asapo_transfer, timeout=3):
     while True:
         try:
             asapo_transfer.run()
         except Stopped:
             break
         except Exception:
-            sleep(args['reconnect_timeout'])
+            sleep(timeout)
             logger.info("Retrying connection")
 
 
