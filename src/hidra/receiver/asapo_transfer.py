@@ -68,7 +68,7 @@ def main():
     parser.add_argument('--start_file_idx', type=int, help='Starting file index',
                         default=1)
     parser.add_argument('--file_regex', type=str, help='Template to file path, which includes `stream` and `file_idx`',
-                        default=".*raw/(?P<scan_id>.*)/\w*_(?P<file_idx_in_scan>.*).h5")
+                        default="current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5")
     parser.add_argument('--timeout', type=float, help='ASAPO send timeout in [s]', default=30)
     parser.add_argument('--signal_host', type=str, help='Signal host', default='localhost')
     parser.add_argument('--target_host', type=str, help='Target host', default='localhost')
