@@ -19,14 +19,14 @@ class Stopped(Exception):
 
 
 class AsapoTransfer:
-    def __init__(self, asapo_worker, signal_host, target_host, target_port, target_dir, reconnect_timout):
+    def __init__(self, asapo_worker, signal_host, detector_id, target_host, target_port, target_dir, reconnect_timout):
 
         self.signal_host = signal_host
         self.targets = [[target_host, target_port, 1]]
         self.target_dir = target_dir
         self.asapo_worker = asapo_worker
         self.reconnect_timout = reconnect_timout
-        self.query = Transfer("STREAM_METADATA", self.signal_host)
+        self.query = Transfer("STREAM_METADATA", self.signal_host, detector_id=detector_id)
         self.stop_run = Event()
 
     def run(self):
@@ -74,6 +74,7 @@ def main():
     parser.add_argument('--target_host', type=str, help='Target host', default='localhost')
     parser.add_argument('--target_port', type=str, help='Target port', default='50101')
     parser.add_argument('--target_dir', type=str, help='Target directory', default='')
+    parser.add_argument('--detector_id', type=str, help='Detector hostname', default='')
     parser.add_argument('--reconnect_timeout', type=int, help='Timeout to reconnect to sender',
                         default=3)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -88,8 +89,14 @@ def main():
                                args['timeout'], args['beamline'],
                                args['start_file_idx'])
 
-    asapo_transfer = AsapoTransfer(asapo_worker, args['signal_host'], args['target_host'], args['target_port'],
-                                   args['target_dir'], args['reconnect_timeout'])
+    asapo_transfer = AsapoTransfer(
+        asapo_worker=asapo_worker,
+        signal_host=args['signal_host'],
+        detector_id=args['detector_id'],
+        target_host=args['target_host'],
+        target_port=args['target_port'],
+        target_dir=args['target_dir'],
+        reconnect_timeout=args['reconnect_timeout'])
 
     signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
     signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
