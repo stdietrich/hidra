@@ -26,21 +26,30 @@ class AsapoTransfer:
         self.target_dir = target_dir
         self.asapo_worker = asapo_worker
         self.reconnect_timout = reconnect_timout
-        self.query = Transfer("STREAM_METADATA", self.signal_host, detector_id=detector_id)
+        logger.info(
+            "Creating Transfer instance type=%s signal_host=%s detector_id=%s use_log=True",
+            "STREAM_METADATA", self.signal_host, detector_id)
+        self.query = Transfer(
+            "STREAM_METADATA", self.signal_host, detector_id=detector_id,
+            use_log=True)
         self.stop_run = Event()
 
     def run(self):
         if self.stop_run.is_set():
             raise Stopped
         try:
+            logger.info("Initiating connection for %s", self.targets)
             self.query.initiate(self.targets)
+            logger.info("Starting query")
             self.query.start()
             self._run()
         finally:
+            logger.info("Stopping query")
             self.query.stop()
 
     def _run(self):
         while not self.stop_run.is_set():
+            logger.debug("Querying next message")
             [metadata, data] = self.query.get(timeout=self.reconnect_timout*1000)
             if metadata is not None:
                 try:
@@ -83,11 +92,19 @@ def main():
     logging.basicConfig(format="%(asctime)s %(module)s %(lineno)-6d %(levelname)-6s %(message)s",
                         level=getattr(logging, args['log_level']))
 
-    asapo_worker = AsapoWorker(args['endpoint'], args['beamtime'], args['token'],
-                               args['n_threads'], args['file_regex'],
-                               args['default_data_source'],
-                               args['timeout'], args['beamline'],
-                               args['start_file_idx'])
+    worker_args = dict(
+        endpoint=args['endpoint'],
+        beamtime=args['beamtime'],
+        token=args['token'],
+        n_threads=args['n_threads'],
+        file_regex=args['file_regex'],
+        default_data_source=args['default_data_source'],
+        timeout=args['timeout'],
+        beamline=args['beamline'],
+        start_file_idx=args['start_file_idx'])
+
+    logger.info("Creating AsapoWorker with %s", worker_args)
+    asapo_worker = AsapoWorker(**worker_args)
 
     asapo_transfer = AsapoTransfer(
         asapo_worker=asapo_worker,
@@ -111,6 +128,8 @@ def run_transfer(asapo_transfer, timeout=3):
         except Stopped:
             break
         except Exception:
+            logger.warning(
+                "Running Transfer stopped with an exception", exc_info=True)
             sleep(timeout)
             logger.info("Retrying connection")
 
