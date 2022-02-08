@@ -71,7 +71,9 @@ def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      description='Transfer files metadata to ASAPO')
     parser.add_argument('--config_file', type=str, help='Path to config file')
-    parser.add_argument('identifier', type=str, help='Beamline and detector ID information')
+    parser.add_argument(
+        'identifier', type=str, 
+        help='Beamline and detector ID information separated by a single underscore')
 
     args = vars(parser.parse_args())
     args = construct_config(args['config_file'], args['identifier'])
