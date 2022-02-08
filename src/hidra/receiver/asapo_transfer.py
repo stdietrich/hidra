@@ -85,7 +85,9 @@ def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      description='Transfer files metadata to ASAPO')
     parser.add_argument('--config_path', type=str, help='Path to config directory')
-    parser.add_argument('identifier', type=str, help='Beamline and detector ID information')
+    parser.add_argument(
+        'identifier', type=str,
+        help='Beamline and detector ID information separated by a single underscore')
     parser.add_argument('--endpoint', type=str, help='ASAPO produces endpoint')
     parser.add_argument('--beamtime', type=str, help='ASAPO produces beamtime')
     parser.add_argument('--beamline', type=str, help='ASAPO produces beamline')
