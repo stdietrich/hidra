@@ -3,6 +3,7 @@ from __future__ import unicode_literals
 
 import argparse
 import logging
+import inspect
 import re
 import signal
 import socket
@@ -19,6 +20,19 @@ logger = logging.getLogger(__name__)
 class Stopped(Exception):
     """Raised when a run is stopped."""
     pass
+
+
+class TransferConfig:
+    def __init__(self, signal_host, target_host, target_dir, detector_id,
+                 endpoint, beamline, default_data_source,
+                 token, n_threads=1, start_file_idx=1, beamtime='auto', target_port=50101,
+                 file_regex="current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5",
+                 timeout=30, reconnect_timeout=3, log_level="INFO"):
+
+        frame = inspect.currentframe()
+        _, _, _, values = inspect.getargvalues(frame)
+        values.pop("self")
+        self.config = values
 
 
 class AsapoTransfer:
@@ -70,13 +84,32 @@ class AsapoTransfer:
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      description='Transfer files metadata to ASAPO')
-    parser.add_argument('--config_file', type=str, help='Path to config file')
+    parser.add_argument('--config_path', type=str, help='Path to config directory')
     parser.add_argument('identifier', type=str, help='Beamline and detector ID information')
+    parser.add_argument('--endpoint', type=str, help='ASAPO produces endpoint')
+    parser.add_argument('--beamtime', type=str, help='ASAPO produces beamtime')
+    parser.add_argument('--beamline', type=str, help='ASAPO produces beamline')
+    parser.add_argument('--default-data-source', type=str, help='ASAPO data_source')
+    parser.add_argument('--token', type=str, help='ASAPO produces token')
+    parser.add_argument('--n_threads', type=int, help='Number of threds for ASAPO producer')
+    parser.add_argument('--start_file_idx', type=int, help='Starting file index')
+    parser.add_argument('--file_regex', type=str, help='Template to file path, which includes `stream` and `file_idx`')
+    parser.add_argument('--timeout', type=float, help='ASAPO send timeout in [s]')
+    parser.add_argument('--signal_host', type=str, help='Signal host')
+    parser.add_argument('--target_host', type=str, help='Target host')
+    parser.add_argument('--target_port', type=str, help='Target port')
+    parser.add_argument('--target_dir', type=str, help='Target directory')
+    parser.add_argument('--detector_id', type=str, help='Detector hostname')
+    parser.add_argument('--reconnect_timeout', type=int, help='Timeout to reconnect to sender')
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="Set log level for the application")
 
     args = vars(parser.parse_args())
-    args = construct_config(args['config_file'], args['identifier'])
+    args = construct_config(args.pop('config_path'), args.pop('identifier'), args)
+    print("ARGS:", args)
     logging.basicConfig(format="%(asctime)s %(module)s %(lineno)-6d %(levelname)-6s %(message)s",
                         level=getattr(logging, args['log_level']))
+    logger.info("Start Asapo transfer with parameters %s", args)
 
     worker_args = dict(
         endpoint=args['endpoint'],
@@ -107,18 +140,25 @@ def main():
     run_transfer(asapo_transfer, args['reconnect_timeout'])
 
 
-def construct_config(config_file, identifier):
+def construct_config(config_path, identifier, args):
 
     # Read config file
-    with open(config_file, "r") as f:
+    with open(f"{config_path}/asapo_transfer_{identifier}.yaml", "r") as f:
         config = yaml.load(f.read(), Loader=yaml.FullLoader)
 
     # parse identifier to extruct `beamline` and `detector_id`
     identifier_info = re.search(".*@(?P<beamline>.*)_(?P<detector_id>.*).service", identifier).groupdict()
     config.update(identifier_info)
 
+    if 'default_data_source' not in config:
+        config['default_data_source'] = f"hidra_{config['detector_id']}"
+
     config['target_host'] = socket.getfqdn()
-    return config
+    config.update({k: v for k, v in args.items() if v})
+
+    transfer_config = TransferConfig(**config)
+
+    return transfer_config.config
 
 
 def run_transfer(asapo_transfer, timeout=3):
