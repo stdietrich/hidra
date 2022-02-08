@@ -3,9 +3,12 @@ from __future__ import unicode_literals
 
 import argparse
 import logging
+import re
 import signal
+import socket
 from threading import Event
 from time import sleep
+import yaml
 
 from hidra import Transfer, __version__, generate_filepath
 from plugins.asapo_producer import AsapoWorker
@@ -19,13 +22,13 @@ class Stopped(Exception):
 
 
 class AsapoTransfer:
-    def __init__(self, asapo_worker, signal_host, detector_id, target_host, target_port, target_dir, reconnect_timout):
+    def __init__(self, asapo_worker, signal_host, detector_id, target_host, target_port, target_dir, reconnect_timeout):
 
         self.signal_host = signal_host
         self.targets = [[target_host, target_port, 1]]
         self.target_dir = target_dir
         self.asapo_worker = asapo_worker
-        self.reconnect_timout = reconnect_timout
+        self.reconnect_timeout = reconnect_timeout
         logger.info(
             "Creating Transfer instance type=%s signal_host=%s detector_id=%s use_log=True",
             "STREAM_METADATA", self.signal_host, detector_id)
@@ -50,7 +53,7 @@ class AsapoTransfer:
     def _run(self):
         while not self.stop_run.is_set():
             logger.debug("Querying next message")
-            [metadata, data] = self.query.get(timeout=self.reconnect_timout*1000)
+            [metadata, data] = self.query.get(timeout=self.reconnect_timeout*1000)
             if metadata is not None:
                 try:
                     local_path = generate_filepath(self.target_dir, metadata)
@@ -67,28 +70,11 @@ class AsapoTransfer:
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      description='Transfer files metadata to ASAPO')
-    parser.add_argument('--endpoint', type=str, help='ASAPO produces endpoint')
-    parser.add_argument('--beamtime', type=str, help='ASAPO produces beamtime')
-    parser.add_argument('--beamline', type=str, help='ASAPO produces beamline')
-    parser.add_argument('--default-data-source', type=str, help='ASAPO data_source')
-    parser.add_argument('--token', type=str, help='ASAPO produces token')
-    parser.add_argument('--n_threads', type=int, help='Number of threds for ASAPO producer',
-                        default=1)
-    parser.add_argument('--start_file_idx', type=int, help='Starting file index',
-                        default=1)
-    parser.add_argument('--file_regex', type=str, help='Template to file path, which includes `stream` and `file_idx`',
-                        default="current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5")
-    parser.add_argument('--timeout', type=float, help='ASAPO send timeout in [s]', default=30)
-    parser.add_argument('--signal_host', type=str, help='Signal host', default='localhost')
-    parser.add_argument('--target_host', type=str, help='Target host', default='localhost')
-    parser.add_argument('--target_port', type=str, help='Target port', default='50101')
-    parser.add_argument('--target_dir', type=str, help='Target directory', default='')
-    parser.add_argument('--detector_id', type=str, help='Detector hostname', default='')
-    parser.add_argument('--reconnect_timeout', type=int, help='Timeout to reconnect to sender',
-                        default=3)
-    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                        help="Set log level for the application")
+    parser.add_argument('--config_file', type=str, help='Path to config file')
+    parser.add_argument('identifier', type=str, help='Beamline and detector ID information')
+
     args = vars(parser.parse_args())
+    args = construct_config(args['config_file'], args['identifier'])
     logging.basicConfig(format="%(asctime)s %(module)s %(lineno)-6d %(levelname)-6s %(message)s",
                         level=getattr(logging, args['log_level']))
 
@@ -119,6 +105,20 @@ def main():
     signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
 
     run_transfer(asapo_transfer, args['reconnect_timeout'])
+
+
+def construct_config(config_file, identifier):
+
+    # Read config file
+    with open(config_file, "r") as f:
+        config = yaml.load(f.read(), Loader=yaml.FullLoader)
+
+    # parse identifier to extruct `beamline` and `detector_id`
+    identifier_info = re.search(".*@(?P<beamline>.*)_(?P<detector_id>.*).service", identifier).groupdict()
+    config.update(identifier_info)
+
+    config['target_host'] = socket.getfqdn()
+    return config
 
 
 def run_transfer(asapo_transfer, timeout=3):
