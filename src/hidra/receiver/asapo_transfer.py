@@ -4,7 +4,6 @@ from __future__ import unicode_literals
 import argparse
 import logging
 import inspect
-import re
 import signal
 import socket
 from threading import Event
@@ -28,11 +27,34 @@ class TransferConfig:
                  token, n_threads=1, start_file_idx=1, beamtime='auto', target_port=50101,
                  file_regex="current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5",
                  timeout=30, reconnect_timeout=3, log_level="INFO"):
+        
+        self.detector_id = detector_id
+        self.log_level = log_level
+        
+        self.endpoint = endpoint
+        self.beamtime = beamtime
+        self.beamline = beamline
+        self.token = token
+        self.n_threads = n_threads
+        self.timeout = timeout
+        self.default_data_source = default_data_source
+        self.file_regex = file_regex
+        self.start_file_idx = start_file_idx
+        
+        self.signal_host = signal_host
+        self.target_port = target_port
+        self.target_host = target_host
+        self.target_dir = target_dir
+        self.reconnect_timeout = reconnect_timeout
 
         frame = inspect.currentframe()
         _, _, _, values = inspect.getargvalues(frame)
         values.pop("self")
+        values.pop("frame")
         self.config = values
+
+    def get_dict(self):
+        return self.config
 
 
 class AsapoTransfer:
@@ -107,38 +129,38 @@ def main():
                         help="Set log level for the application")
 
     args = vars(parser.parse_args())
-    args = construct_config(args.pop('config_path'), args.pop('identifier'), args)
+    config = construct_config(args.pop('config_path'), args.pop('identifier'), args)
     logging.basicConfig(format="%(asctime)s %(module)s %(lineno)-6d %(levelname)-6s %(message)s",
-                        level=getattr(logging, args['log_level']))
-    logger.info("Start Asapo transfer with parameters %s", args)
+                        level=getattr(logging, config.log_level))
+    logger.info("Start Asapo transfer with parameters %s", config.get_dict())
 
     worker_args = dict(
-        endpoint=args['endpoint'],
-        beamtime=args['beamtime'],
-        token=args['token'],
-        n_threads=args['n_threads'],
-        file_regex=args['file_regex'],
-        default_data_source=args['default_data_source'],
-        timeout=args['timeout'],
-        beamline=args['beamline'],
-        start_file_idx=args['start_file_idx'])
+        endpoint=config.endpoint,
+        beamtime=config.beamtime,
+        token=config.token,
+        n_threads=config.n_threads,
+        file_regex=config.file_regex,
+        default_data_source=config.default_data_source,
+        timeout=config.timeout,
+        beamline=config.beamline,
+        start_file_idx=config.start_file_idx)
 
     logger.info("Creating AsapoWorker with %s", worker_args)
     asapo_worker = AsapoWorker(**worker_args)
 
     asapo_transfer = AsapoTransfer(
         asapo_worker=asapo_worker,
-        signal_host=args['signal_host'],
-        detector_id=args['detector_id'],
-        target_host=args['target_host'],
-        target_port=args['target_port'],
-        target_dir=args['target_dir'],
-        reconnect_timeout=args['reconnect_timeout'])
+        signal_host=config.signal_host,
+        detector_id=config.detector_id,
+        target_host=config.target_host,
+        target_port=config.target_port,
+        target_dir=config.target_dir,
+        reconnect_timeout=config.reconnect_timeout)
 
     signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
     signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
 
-    run_transfer(asapo_transfer, args['reconnect_timeout'])
+    run_transfer(asapo_transfer, config.reconnect_timeout)
 
 
 def construct_config(config_path, identifier, args):
@@ -158,9 +180,7 @@ def construct_config(config_path, identifier, args):
     config['target_host'] = socket.getfqdn()
     config.update({k: v for k, v in args.items() if v})
 
-    transfer_config = TransferConfig(**config)
-
-    return transfer_config.config
+    return TransferConfig(**config)
 
 
 def run_transfer(asapo_transfer, timeout=3):
