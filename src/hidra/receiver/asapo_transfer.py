@@ -108,7 +108,6 @@ def main():
 
     args = vars(parser.parse_args())
     args = construct_config(args.pop('config_path'), args.pop('identifier'), args)
-    print("ARGS:", args)
     logging.basicConfig(format="%(asctime)s %(module)s %(lineno)-6d %(levelname)-6s %(message)s",
                         level=getattr(logging, args['log_level']))
     logger.info("Start Asapo transfer with parameters %s", args)
@@ -149,8 +148,9 @@ def construct_config(config_path, identifier, args):
         config = yaml.load(f.read(), Loader=yaml.FullLoader)
 
     # parse identifier to extruct `beamline` and `detector_id`
-    identifier_info = re.search(".*@(?P<beamline>.*)_(?P<detector_id>.*).service", identifier).groupdict()
-    config.update(identifier_info)
+    beamline, detector_id = identifier.split("_", maxsplit=1)
+    config['beamline'] = beamline
+    config['detector_id'] = detector_id
 
     if 'default_data_source' not in config:
         config['default_data_source'] = f"hidra_{config['detector_id']}"
