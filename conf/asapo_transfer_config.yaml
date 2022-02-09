@@ -11,25 +11,25 @@ token: bla
 # default_data_source: hidra_test
 
 # Number of threds for ASAPO producer
-n_threads: 1
+# n_threads: 1
 
 # Starting file index
-start_file_idx: 1
+# start_file_idx: 1
 
 # Template to file path, which includes `stream` and `file_idx`
-file_regex: "current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5"
+# file_regex: "current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5"
 
 # ASAPO send timeout in [s]
-timeout: 30
+# timeout: 30
 
 # Signal host
-signal_host: 'localhost'
+# signal_host: 'localhost'
 
 # Target port
 # target_port: '50101'
 
 # Target directory
-target_dir: ''
+# target_dir: ''
 
 # Timeout to reconnect to sender
 # reconnect_timeout: 3
