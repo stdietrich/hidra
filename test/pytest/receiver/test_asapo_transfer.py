@@ -37,6 +37,7 @@ def config():
 @pytest.fixture
 def transfer_config():
     transfer_config = dict(
+        detector_id="foo",
         signal_host="localhost",
         target_host="localhost",
         target_port="50101",
@@ -75,11 +76,17 @@ def worker(config):
 
 
 @pytest.fixture
-def asapo_transfer(worker, transfer_config, hidra_metadata):
-    asapo_transfer = AsapoTransfer(worker, transfer_config['signal_host'], transfer_config['target_host'],
+def query(config):
+    query = create_autospec(Transfer, instance=True)
+    yield query
+
+
+@pytest.fixture
+def asapo_transfer(worker, query, transfer_config, hidra_metadata):
+    asapo_transfer = AsapoTransfer(worker, query,
+                                   transfer_config['target_host'],
                                    transfer_config['target_port'],
                                    transfer_config['target_dir'], transfer_config['reconnect_timeout'])
-    asapo_transfer.query = create_autospec(Transfer, instance=True)
     return_list = [[metadata, None] for metadata in hidra_metadata]
     asapo_transfer.query.get.side_effect = return_list
     yield asapo_transfer
@@ -123,3 +130,34 @@ def test_path_parsing(asapo_transfer, file_list, hidra_metadata):
         assert file_idx == 1
         assert stream == stream_list[i]
         assert data_source == 'test001'
+
+
+def test_init_query(caplog, asapo_transfer):
+    asapo_transfer.query.initiate.side_effect = KeyError('foo')
+    x = threading.Thread(target=run_transfer, args=(asapo_transfer, 1))
+    x.start()
+    sleep(2)
+    assert "Retrying connection" in caplog.text
+    assert "Stopping query" in caplog.text
+    assert "Starting query" not in caplog.text
+    asapo_transfer.query.stop.assert_called_with()
+    asapo_transfer.stop()
+    sleep(1)
+    assert "Runner is stopped" in caplog.text
+    x.join()
+
+
+def test_start_query(caplog, asapo_transfer):
+    asapo_transfer.query.start.side_effect = KeyError('foo')
+    x = threading.Thread(target=run_transfer, args=(asapo_transfer, 1))
+    x.start()
+    sleep(2)
+    assert "Retrying connection" in caplog.text
+    assert "Stopping query" in caplog.text
+    assert "Starting query" in caplog.text
+    asapo_transfer.query.start.assert_called_with()
+    asapo_transfer.query.stop.assert_called_with()
+    asapo_transfer.stop()
+    sleep(1)
+    assert "Runner is stopped" in caplog.text
+    x.join()
