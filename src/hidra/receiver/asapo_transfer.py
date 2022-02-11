@@ -54,19 +54,13 @@ class TransferConfig:
 
 
 class AsapoTransfer:
-    def __init__(self, asapo_worker, signal_host, detector_id, target_host, target_port, target_dir, reconnect_timeout):
+    def __init__(self, asapo_worker, query, target_host, target_port, target_dir, reconnect_timeout):
 
-        self.signal_host = signal_host
+        self.query = query
         self.targets = [[target_host, target_port, 1]]
         self.target_dir = target_dir
         self.asapo_worker = asapo_worker
         self.reconnect_timeout = reconnect_timeout
-        logger.info(
-            "Creating Transfer instance type=%s signal_host=%s detector_id=%s use_log=True",
-            "STREAM_METADATA", self.signal_host, detector_id)
-        self.query = Transfer(
-            "STREAM_METADATA", self.signal_host, detector_id=detector_id,
-            use_log=True)
         self.stop_run = Event()
 
     def run(self):
@@ -127,10 +121,15 @@ def main():
     logger.info("Creating AsapoWorker with %s", worker_args)
     asapo_worker = AsapoWorker(**worker_args)
 
+    logger.info(
+        "Creating Transfer instance type=%s signal_host=%s detector_id=%s use_log=True",
+        "STREAM_METADATA", config.signal_host, config.detector_id)
+    query = Transfer("STREAM_METADATA", config.signal_host, detector_id=config.detector_id,
+                     use_log=True)
+
     asapo_transfer = AsapoTransfer(
         asapo_worker=asapo_worker,
-        signal_host=config.signal_host,
-        detector_id=config.detector_id,
+        query=query,
         target_host=config.target_host,
         target_port=config.target_port,
         target_dir=config.target_dir,
