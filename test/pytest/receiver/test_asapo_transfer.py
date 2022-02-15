@@ -132,32 +132,59 @@ def test_path_parsing(asapo_transfer, file_list, hidra_metadata):
         assert data_source == 'test001'
 
 
-def test_init_query(caplog, asapo_transfer):
-    asapo_transfer.query.initiate.side_effect = KeyError('foo')
-    x = threading.Thread(target=run_transfer, args=(asapo_transfer, 1))
-    x.start()
-    sleep(2)
-    assert "Retrying connection" in caplog.text
-    assert "Stopping query" in caplog.text
-    assert "Starting query" not in caplog.text
+def test_init_query(asapo_transfer, file_list, hidra_metadata):
+
+    def initiate_effect():
+        counter = 0
+        while True:
+            sleep(0.5)
+            counter += 1
+            if counter == 1:
+                yield KeyError("foo")
+            yield counter
+
+    asapo_transfer.query.initiate.side_effect = initiate_effect()
+    asapo_transfer.stop_run.is_set = Mock()
+    asapo_transfer.stop_run.is_set.side_effect = [False, False, False, True]
+
+    with pytest.raises(KeyError):
+        asapo_transfer.run()
+
+    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
+    asapo_transfer.query.start.assert_not_called()
     asapo_transfer.query.stop.assert_called_with()
-    asapo_transfer.stop()
-    sleep(1)
-    assert "Runner is stopped" in caplog.text
-    x.join()
+
+    asapo_transfer.run()
+    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
+    asapo_transfer.query.start.assert_called_with()
+    asapo_transfer.asapo_worker.send_message.assert_called_with(file_list[0], hidra_metadata[0])
+    asapo_transfer.query.stop.assert_called_with()
 
 
-def test_start_query(caplog, asapo_transfer):
-    asapo_transfer.query.start.side_effect = KeyError('foo')
-    x = threading.Thread(target=run_transfer, args=(asapo_transfer, 1))
-    x.start()
-    sleep(2)
-    assert "Retrying connection" in caplog.text
-    assert "Stopping query" in caplog.text
-    assert "Starting query" in caplog.text
+def test_start_query(asapo_transfer, file_list, hidra_metadata):
+    def start_effect():
+        counter = 0
+        while True:
+            sleep(0.5)
+            counter += 1
+            if counter == 1:
+                yield KeyError("foo")
+            yield counter
+
+    asapo_transfer.query.start.side_effect = start_effect()
+
+    asapo_transfer.stop_run.is_set = Mock()
+    asapo_transfer.stop_run.is_set.side_effect = [False, False, False, True]
+
+    with pytest.raises(KeyError):
+        asapo_transfer.run()
+
+    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
     asapo_transfer.query.start.assert_called_with()
     asapo_transfer.query.stop.assert_called_with()
-    asapo_transfer.stop()
-    sleep(1)
-    assert "Runner is stopped" in caplog.text
-    x.join()
+
+    asapo_transfer.run()
+    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
+    asapo_transfer.query.start.assert_called_with()
+    asapo_transfer.asapo_worker.send_message.assert_called_with(file_list[0], hidra_metadata[0])
+    asapo_transfer.query.stop.assert_called_with()
