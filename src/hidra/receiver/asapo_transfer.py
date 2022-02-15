@@ -49,9 +49,6 @@ class TransferConfig:
     def __repr__(self):
         return str(self.__dict__)
 
-    def get_dict(self):
-        return self.config
-
 
 class AsapoTransfer:
     def __init__(self, asapo_worker, query, target_host, target_port, target_dir, reconnect_timeout):
@@ -154,8 +151,9 @@ def construct_config(config_path, identifier):
 
     if 'default_data_source' not in config:
         config['default_data_source'] = detector_id
-        if ".desy.de" in detector_id:
-            config['default_data_source'] = detector_id[:detector_id.find(".desy.de")]
+        # remove `.desy.de` if present at the end
+        if detector_id[-8:] == ".desy.de":
+            config['default_data_source'] = detector_id[:-8]
 
     config['target_host'] = socket.getfqdn()
     config['signal_host'] = _constants.CONNECTION_LIST[beamline]['host']
