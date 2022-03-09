@@ -7,6 +7,7 @@ from time import time, sleep
 from unittest.mock import create_autospec, patch, Mock
 import asapo_producer
 import threading
+import zmq
 
 receiver_path = (Path(__file__).parent.parent.parent.parent / "src/hidra/receiver")
 assert receiver_path.is_dir()
@@ -97,11 +98,11 @@ def test_asapo_transfer(caplog, file_list, asapo_transfer):
     x = threading.Thread(target=asapo_transfer.run, args=())
     x.start()
     sleep(1)
-    assert f"Send file {file_list[0]}" in caplog.text
     asapo_transfer.stop()
     sleep(1)
-    assert "Runner is stopped" in caplog.text
     x.join()
+    assert f"Send file {file_list[0]}" in caplog.text
+    assert "Runner is stopped" in caplog.text
 
 
 def test_run_transfer(caplog, asapo_transfer):
@@ -109,11 +110,11 @@ def test_run_transfer(caplog, asapo_transfer):
     x = threading.Thread(target=run_transfer, args=(asapo_transfer, 1))
     x.start()
     sleep(2)
-    assert "Retrying connection" in caplog.text
     asapo_transfer.stop()
     sleep(1)
-    assert "Runner is stopped" in caplog.text
     x.join()
+    assert "Retrying connection" in caplog.text
+    assert "Runner is stopped" in caplog.text
 
 
 def test_path_parsing(asapo_transfer, file_list, hidra_metadata):
@@ -150,13 +151,13 @@ def test_init_query(asapo_transfer, file_list, hidra_metadata):
     with pytest.raises(KeyError):
         asapo_transfer.run()
 
-    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
-    asapo_transfer.query.start.assert_not_called()
+    asapo_transfer.query.start.assert_called_with([asapo_transfer.target_host, asapo_transfer.target_port])
+    asapo_transfer.query.initiate.assert_called_with([[asapo_transfer.target_host, asapo_transfer.target_port, 1]])
     asapo_transfer.query.stop.assert_called_with()
 
     asapo_transfer.run()
-    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
-    asapo_transfer.query.start.assert_called_with()
+    asapo_transfer.query.start.assert_called_with([asapo_transfer.target_host, asapo_transfer.target_port])
+    asapo_transfer.query.initiate.assert_called_with([[asapo_transfer.target_host, asapo_transfer.target_port, 1]])
     asapo_transfer.asapo_worker.send_message.assert_called_with(file_list[0], hidra_metadata[0])
     asapo_transfer.query.stop.assert_called_with()
 
@@ -179,12 +180,33 @@ def test_start_query(asapo_transfer, file_list, hidra_metadata):
     with pytest.raises(KeyError):
         asapo_transfer.run()
 
-    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
-    asapo_transfer.query.start.assert_called_with()
+    asapo_transfer.query.start.assert_called_with([asapo_transfer.target_host, asapo_transfer.target_port])
     asapo_transfer.query.stop.assert_called_with()
 
     asapo_transfer.run()
-    asapo_transfer.query.initiate.assert_called_with(asapo_transfer.targets)
-    asapo_transfer.query.start.assert_called_with()
+    asapo_transfer.query.start.assert_called_with([asapo_transfer.target_host, asapo_transfer.target_port])
+    asapo_transfer.query.initiate.assert_called_with([[asapo_transfer.target_host, asapo_transfer.target_port, 1]])
     asapo_transfer.asapo_worker.send_message.assert_called_with(file_list[0], hidra_metadata[0])
     asapo_transfer.query.stop.assert_called_with()
+
+
+def test_zmq_error(caplog, asapo_transfer):
+    def start_effect():
+        counter = 0
+        while True:
+            sleep(0.5)
+            counter += 1
+            if counter == 1:
+                yield zmq.error.ZMQError("foo")
+            yield counter
+
+    asapo_transfer.query.start.side_effect = start_effect()
+
+    x = threading.Thread(target=run_transfer, args=(asapo_transfer, 1))
+    x.start()
+    sleep(2)
+    asapo_transfer.stop()
+    sleep(1)
+    x.join()
+    assert "Retrying connection with different port" in caplog.text
+    assert "Runner is stopped" in caplog.text

@@ -5,7 +5,7 @@ endpoint: localhost:8000
 # beamtime: auto
 
 # ASAPO produces token
-token: bla
+# token_path: '/gpfs/asapo/shared/beamline_tokens'
 
 # ASAPO data_source
 # default_data_source: hidra_test

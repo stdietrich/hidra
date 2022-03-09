@@ -3,11 +3,13 @@ from __future__ import unicode_literals
 
 import argparse
 import logging
+import random
 import signal
 import socket
 from threading import Event
 from time import sleep
 import yaml
+import zmq
 
 from hidra import Transfer, __version__, generate_filepath, _constants
 from plugins.asapo_producer import AsapoWorker
@@ -23,7 +25,8 @@ class Stopped(Exception):
 class TransferConfig:
     def __init__(self, signal_host, target_host, detector_id,
                  endpoint, beamline, default_data_source,
-                 token, target_dir='', n_threads=1, start_file_idx=1, beamtime='auto', target_port=50101,
+                 token_path='/gpfs/asapo/shared/beamline_tokens',
+                 target_dir='', n_threads=1, start_file_idx=1, beamtime='auto', target_port=50101,
                  file_regex="current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5",
                  timeout=30, reconnect_timeout=3, log_level="INFO"):
         
@@ -33,7 +36,8 @@ class TransferConfig:
         self.endpoint = endpoint
         self.beamtime = beamtime
         self.beamline = beamline
-        self.token = token
+        with open(token_path, "r") as f:
+            self.token = f.readline().split("\n")[0]
         self.n_threads = n_threads
         self.timeout = timeout
         self.default_data_source = default_data_source
@@ -50,11 +54,21 @@ class TransferConfig:
         return str(self.__dict__)
 
 
+def create_query(signal_host, detector_id):
+    logger.info(
+        "Creating Transfer instance type=%s signal_host=%s detector_id=%s use_log=True",
+        "STREAM_METADATA", signal_host, detector_id)
+    query = Transfer("STREAM_METADATA", signal_host, detector_id=detector_id,
+                     use_log=True)
+    return query
+
+
 class AsapoTransfer:
     def __init__(self, asapo_worker, query, target_host, target_port, target_dir, reconnect_timeout):
 
         self.query = query
-        self.targets = [[target_host, target_port, 1]]
+        self.target_host = target_host
+        self.target_port = target_port
         self.target_dir = target_dir
         self.asapo_worker = asapo_worker
         self.reconnect_timeout = reconnect_timeout
@@ -64,10 +78,10 @@ class AsapoTransfer:
         if self.stop_run.is_set():
             raise Stopped
         try:
-            logger.info("Initiating connection for %s", self.targets)
-            self.query.initiate(self.targets)
             logger.info("Starting query")
-            self.query.start()
+            self.query.start([self.target_host, self.target_port])
+            logger.info("Initiating connection for %s : %s", self.target_host, self.target_port)
+            self.query.initiate([[self.target_host, self.target_port, 1]])
             self._run()
         finally:
             logger.info("Stopping query")
@@ -118,15 +132,9 @@ def main():
     logger.info("Creating AsapoWorker with %s", worker_args)
     asapo_worker = AsapoWorker(**worker_args)
 
-    logger.info(
-        "Creating Transfer instance type=%s signal_host=%s detector_id=%s use_log=True",
-        "STREAM_METADATA", config.signal_host, config.detector_id)
-    query = Transfer("STREAM_METADATA", config.signal_host, detector_id=config.detector_id,
-                     use_log=True)
-
     asapo_transfer = AsapoTransfer(
         asapo_worker=asapo_worker,
-        query=query,
+        query=create_query(config.signal_host, config.detector_id),
         target_host=config.target_host,
         target_port=config.target_port,
         target_dir=config.target_dir,
@@ -135,7 +143,7 @@ def main():
     signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
     signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
 
-    run_transfer(asapo_transfer, config.reconnect_timeout)
+    run_transfer(asapo_transfer, config, config.reconnect_timeout)
 
 
 def construct_config(config_path, identifier):
@@ -161,12 +169,17 @@ def construct_config(config_path, identifier):
     return TransferConfig(**config)
 
 
-def run_transfer(asapo_transfer, timeout=3):
+def run_transfer(asapo_transfer, config, timeout=3):
     while True:
         try:
             asapo_transfer.run()
         except Stopped:
             break
+        except zmq.error.ZMQError:
+            logger.warning("Running Transfer stopped with an exception", exc_info=True)
+            logger.info("Retrying connection with different port")
+            asapo_transfer.query = create_query(config.signal_host, config.detector_id)
+            asapo_transfer.target_port = random.randrange(50101, 50200)
         except Exception:
             logger.warning(
                 "Running Transfer stopped with an exception", exc_info=True)
