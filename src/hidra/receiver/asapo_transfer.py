@@ -26,7 +26,7 @@ class TransferConfig:
     def __init__(self, signal_host, target_host, detector_id,
                  endpoint, beamline, default_data_source,
                  token_path='/gpfs/asapo/shared/beamline_tokens',
-                 target_dir='', n_threads=1, start_file_idx=1, beamtime='auto', target_port=50101,
+                 target_dir='', n_threads=1, start_file_idx=1, beamtime='auto',
                  file_regex="current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5",
                  timeout=30, reconnect_timeout=3, log_level="INFO"):
         
@@ -36,8 +36,7 @@ class TransferConfig:
         self.endpoint = endpoint
         self.beamtime = beamtime
         self.beamline = beamline
-        with open(token_path, "r") as f:
-            self.token = f.readline().split("\n")[0]
+        self.token = read_token(token_path, beamline)
         self.n_threads = n_threads
         self.timeout = timeout
         self.default_data_source = default_data_source
@@ -45,13 +44,18 @@ class TransferConfig:
         self.start_file_idx = start_file_idx
         
         self.signal_host = signal_host
-        self.target_port = target_port
         self.target_host = target_host
         self.target_dir = target_dir
         self.reconnect_timeout = reconnect_timeout
 
     def __repr__(self):
         return str(self.__dict__)
+
+
+def read_token(token_path, beamline):
+    with open(f"{token_path}/{beamline}.token", "r") as f:
+        token = f.readline().split("\n")[0]
+    return token
 
 
 def create_query(signal_host, detector_id):
@@ -61,6 +65,21 @@ def create_query(signal_host, detector_id):
     query = Transfer("STREAM_METADATA", signal_host, detector_id=detector_id,
                      use_log=True)
     return query
+
+
+def create_asapo_transfer(asapo_worker, query, target_host, target_dir, reconnect_timeout):
+    target_port = random.randrange(50101, 50200)
+    asapo_transfer = AsapoTransfer(
+        asapo_worker=asapo_worker,
+        query=query,
+        target_host=target_host,
+        target_port=target_port,
+        target_dir=target_dir,
+        reconnect_timeout=reconnect_timeout)
+
+    signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
+    signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
+    return asapo_transfer
 
 
 class AsapoTransfer:
@@ -131,19 +150,7 @@ def main():
 
     logger.info("Creating AsapoWorker with %s", worker_args)
     asapo_worker = AsapoWorker(**worker_args)
-
-    asapo_transfer = AsapoTransfer(
-        asapo_worker=asapo_worker,
-        query=create_query(config.signal_host, config.detector_id),
-        target_host=config.target_host,
-        target_port=config.target_port,
-        target_dir=config.target_dir,
-        reconnect_timeout=config.reconnect_timeout)
-
-    signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
-    signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
-
-    run_transfer(asapo_transfer, config, config.reconnect_timeout)
+    run_transfer(asapo_worker, config, config.reconnect_timeout)
 
 
 def construct_config(config_path, identifier):
@@ -169,17 +176,27 @@ def construct_config(config_path, identifier):
     return TransferConfig(**config)
 
 
-def run_transfer(asapo_transfer, config, timeout=3):
+def run_transfer(asapo_worker, config, timeout=3):
+
+    query = create_query(config.signal_host, config.detector_id)
+    asapo_transfer = create_asapo_transfer(asapo_worker, query,
+                                           config.target_host, config.target_dir, config.reconnect_timeout)
     while True:
         try:
             asapo_transfer.run()
         except Stopped:
             break
-        except zmq.error.ZMQError:
+        except zmq.error.ZMQError as e:
             logger.warning("Running transfer raised ZMQ exception", exc_info=True)
-            logger.info("Retrying connection with different port")
-            asapo_transfer.query = create_query(config.signal_host, config.detector_id)
-            asapo_transfer.target_port = random.randrange(50101, 50200)
+            if e.errno == zmq.EADDRINUSE:
+                logger.info("Retrying connection with different port")
+                query = create_query(config.signal_host, config.detector_id)
+                asapo_transfer = create_asapo_transfer(asapo_worker, query,
+                                                       config.target_host, config.target_dir,
+                                                       config.reconnect_timeout)
+            else:
+                sleep(timeout)
+                logger.info("Retrying connection")
         except Exception:
             logger.warning(
                 "Running Transfer stopped with an exception", exc_info=True)
