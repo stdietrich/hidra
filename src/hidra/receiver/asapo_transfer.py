@@ -176,7 +176,7 @@ def run_transfer(asapo_transfer, config, timeout=3):
         except Stopped:
             break
         except zmq.error.ZMQError:
-            logger.warning("Running Transfer stopped with an exception", exc_info=True)
+            logger.warning("Running transfer raised ZMQ exception", exc_info=True)
             logger.info("Retrying connection with different port")
             asapo_transfer.query = create_query(config.signal_host, config.detector_id)
             asapo_transfer.target_port = random.randrange(50101, 50200)
