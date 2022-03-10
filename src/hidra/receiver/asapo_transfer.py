@@ -9,7 +9,6 @@ import socket
 from threading import Event
 from time import sleep
 import yaml
-import zmq
 
 from hidra import Transfer, __version__, generate_filepath, _constants
 from plugins.asapo_producer import AsapoWorker
@@ -24,8 +23,7 @@ class Stopped(Exception):
 
 class TransferConfig:
     def __init__(self, signal_host, target_host, detector_id,
-                 endpoint, beamline, default_data_source,
-                 token_path='/gpfs/asapo/shared/beamline_tokens',
+                 endpoint, beamline, default_data_source, token,
                  target_dir='', n_threads=1, start_file_idx=1, beamtime='auto',
                  file_regex="current/raw/(?P<scan_id>.*)_(?P<file_idx_in_scan>.*).h5",
                  timeout=30, reconnect_timeout=3, log_level="INFO"):
@@ -36,7 +34,7 @@ class TransferConfig:
         self.endpoint = endpoint
         self.beamtime = beamtime
         self.beamline = beamline
-        self.token = read_token(token_path, beamline)
+        self.token = token
         self.n_threads = n_threads
         self.timeout = timeout
         self.default_data_source = default_data_source
@@ -77,8 +75,6 @@ def create_asapo_transfer(asapo_worker, query, target_host, target_dir, reconnec
         target_dir=target_dir,
         reconnect_timeout=reconnect_timeout)
 
-    signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
-    signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
     return asapo_transfer
 
 
@@ -170,6 +166,9 @@ def construct_config(config_path, identifier):
         if detector_id[-8:] == ".desy.de":
             config['default_data_source'] = detector_id[:-8]
 
+    token_path = config.pop('token_path', '/gpfs/asapo/shared/beamline_tokens')
+    config['token'] = read_token(token_path, beamline)
+
     config['target_host'] = socket.getfqdn()
     config['signal_host'] = _constants.CONNECTION_LIST[beamline]['host']
 
@@ -178,25 +177,16 @@ def construct_config(config_path, identifier):
 
 def run_transfer(asapo_worker, config, timeout=3):
 
-    query = create_query(config.signal_host, config.detector_id)
-    asapo_transfer = create_asapo_transfer(asapo_worker, query,
-                                           config.target_host, config.target_dir, config.reconnect_timeout)
     while True:
         try:
+            query = create_query(config.signal_host, config.detector_id)
+            asapo_transfer = create_asapo_transfer(asapo_worker, query,
+                                                   config.target_host, config.target_dir, config.reconnect_timeout)
+            signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
+            signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
             asapo_transfer.run()
         except Stopped:
             break
-        except zmq.error.ZMQError as e:
-            logger.warning("Running transfer raised ZMQ exception", exc_info=True)
-            if e.errno == zmq.EADDRINUSE:
-                logger.info("Retrying connection with different port")
-                query = create_query(config.signal_host, config.detector_id)
-                asapo_transfer = create_asapo_transfer(asapo_worker, query,
-                                                       config.target_host, config.target_dir,
-                                                       config.reconnect_timeout)
-            else:
-                sleep(timeout)
-                logger.info("Retrying connection")
         except Exception:
             logger.warning(
                 "Running Transfer stopped with an exception", exc_info=True)
