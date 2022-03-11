@@ -152,7 +152,7 @@ def main():
 def construct_config(config_path, identifier):
 
     # Read config file
-    with open(f"{config_path}/asapo_transfer_{identifier}.yaml", "r") as f:
+    with open("{}/asapo_transfer_{}.yaml".format(config_path, identifier), "r") as f:
         config = yaml.load(f.read(), Loader=yaml.FullLoader)
 
     # parse identifier to extruct `beamline` and `detector_id`
@@ -176,14 +176,22 @@ def construct_config(config_path, identifier):
 
 
 def run_transfer(asapo_worker, config, timeout=3):
+    asapo_transfer = None
+    stop_event = Event()
 
-    while True:
+    def signal_handler(s, f):
+        stop_event.set()
+        if asapo_transfer:
+            asapo_transfer.stop()
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    while not stop_event.is_set():
         try:
             query = create_query(config.signal_host, config.detector_id)
             asapo_transfer = create_asapo_transfer(asapo_worker, query,
                                                    config.target_host, config.target_dir, config.reconnect_timeout)
-            signal.signal(signal.SIGINT, lambda s, f: asapo_transfer.stop())
-            signal.signal(signal.SIGTERM, lambda s, f: asapo_transfer.stop())
             asapo_transfer.run()
         except Stopped:
             break
